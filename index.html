@@ -164,7 +164,14 @@
     // Connection details
     const serverUrl = "https://webrtc-production-6f32.up.railway.app";
     const roomId = "1234"; // Use a unique room ID
-    const socket = io(serverUrl);
+
+    const socket = io(serverUrl, {
+      //  This is important for debugging connection issues
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: Infinity
+    });
 
     // WebRTC variables
     let localStream;
@@ -181,6 +188,7 @@
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
+        { urls: "stun:trickle-ice.net:3478" },  //Added this!
         {
           urls: 'turn:numb.viagenie.ca',
           username: 'webrtc@live.com',
@@ -215,6 +223,8 @@
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
+
+    let myUserId;  // Store my own socket ID
 
     // Start call button handler
     startCallButton.addEventListener('click', startCall);
@@ -272,8 +282,10 @@
 
         // Check local audio tracks are available
         const audioTracks = localStream.getAudioTracks();
-        updateStatus(`Local audio tracks: ${audioTracks.length}. Enabled: ${audioTracks.length > 0 ? audioTracks[0].enabled : 'N/A'
-          }`);
+        updateStatus(`Local audio tracks: ${audioTracks.length}. Enabled: ${audioTracks.length > 0 ? audioTracks[0].enabled : 'N/A'}`);
+
+        const videoTracks = localStream.getVideoTracks(); // CHECK VIDEO TRACKS
+        updateStatus(`Local video tracks: ${videoTracks.length}. Enabled: ${videoTracks.length > 0 ? videoTracks[0].enabled : 'N/A'}`);
 
         // Initialize WebRTC
         createPeerConnection();
@@ -400,16 +412,14 @@
       // Check local audio
       if (localStream) {
         const localAudioTracks = localStream.getAudioTracks();
-        updateStatus(`Local audio tracks: ${localAudioTracks.length}. Enabled: ${localAudioTracks.length > 0 ? localAudioTracks[0].enabled : 'N/A'
-          }`);
+        updateStatus(`Local audio tracks: ${localAudioTracks.length}. Enabled: ${localAudioTracks.length > 0 ? localAudioTracks[0].enabled : 'N/A'}`);
       }
 
       // Check remote audio
       if (remoteVideo.srcObject) {
         const remoteAudioTracks = remoteVideo.srcObject.getAudioTracks();
 
-        updateStatus(`Remote audio tracks: ${remoteAudioTracks.length}. Enabled: ${remoteAudioTracks.length > 0 ? remoteAudioTracks[0].enabled : 'N/A'
-          }`);
+        updateStatus(`Remote audio tracks: ${remoteAudioTracks.length}. Enabled: ${remoteAudioTracks.length > 0 ? remoteAudioTracks[0].enabled : 'N/A'}`);
 
         // Make sure remote audio tracks are enabled
         if (remoteAudioTracks.length > 0) {
@@ -597,12 +607,12 @@
     }
 
     socket.on('chat-message', (data) => {
-      displayMessage(data.message);
+      displayMessage(data.message, data.sender);  // Use the sender
     });
 
-    function displayMessage(message) {
+    function displayMessage(message, sender) {
       const messageElement = document.createElement('div');
-      messageElement.textContent = message;
+      messageElement.textContent = `${sender}: ${message}`;  // Show sender!
       chatMessages.appendChild(messageElement);
       chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
     }
@@ -610,6 +620,7 @@
     // Socket.io event handlers
     socket.on("connect", () => {
       updateStatus("Connected to signaling server");
+      myUserId = socket.id; // Store your own socket ID
     });
 
     socket.on("connect_error", (error) => {
@@ -617,9 +628,15 @@
     });
 
     socket.on("user-connected", async (userId) => {
-      updateStatus(`User connected: ${userId}. Creating offer...`);
-      isInitiator = true;
+      if (userId !== myUserId) {   // IMPORTANT:  Prevent connecting to yourself!
+        updateStatus(`User connected: ${userId}. Creating offer...`);
+        isInitiator = true;  // You are the offerer
+        createAndSendOffer();  // Call the refactored function
+      }
+    });
 
+    // Refactored function to create and send the offer.
+    async function createAndSendOffer() {
       try {
         if (!peerConnection) {
           createPeerConnection();
@@ -634,9 +651,6 @@
 
         const offer = await peerConnection.createOffer(offerOptions);
 
-        // Ensure offer prioritizes audio
-        let modifiedOffer = offer.sdp;
-
         // Log SDP for debugging
         updateStatus("Created offer SDP");
 
@@ -646,57 +660,66 @@
         console.error("Error creating offer:", error);
         updateStatus(`Error creating offer: ${error.message}`);
       }
-    });
+    }
 
-    socket.on("offer", async ({ offer }) => {
-      try {
-        updateStatus("Received offer. Creating answer...");
+    socket.on("offer", async ({ offer, from }) => {
+      //  Added the "from" check!
+      if (from !== myUserId) {   // VERY IMPORTANT!  Don't process your own offer!
+        try {
+          updateStatus("Received offer. Creating answer...");
 
-        if (!peerConnection) {
-          createPeerConnection();
+          if (!peerConnection) {
+            createPeerConnection();
+          }
+
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+          // Create answer with audio preferences
+          const answerOptions = {
+            voiceActivityDetection: true
+          };
+
+          const answer = await peerConnection.createAnswer(answerOptions);
+
+          // Log SDP for debugging
+          updateStatus("Created answer SDP");
+
+          await peerConnection.setLocalDescription(answer);
+          socket.emit("answer", { answer, roomId });
+        } catch (error) {
+          console.error("Error handling offer:", error);
+          updateStatus(`Error handling offer: ${error.message}`);
         }
-
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Create answer with audio preferences
-        const answerOptions = {
-          voiceActivityDetection: true
-        };
-
-        const answer = await peerConnection.createAnswer(answerOptions);
-
-        // Log SDP for debugging
-        updateStatus("Created answer SDP");
-
-        await peerConnection.setLocalDescription(answer);
-        socket.emit("answer", { answer, roomId });
-      } catch (error) {
-        console.error("Error handling offer:", error);
-        updateStatus(`Error handling offer: ${error.message}`);
       }
     });
 
-    socket.on("answer", async ({ answer }) => {
-      try {
-        updateStatus("Received answer");
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      } catch (error) {
-        console.error("Error handling answer:", error);
-        updateStatus(`Error handling answer: ${error.message}`);
+    socket.on("answer", async ({ answer, from }) => {
+      //  Added the "from" check!
+      if (from !== myUserId) { // VERY IMPORTANT! Don't process your own answer!
+        try {
+          updateStatus("Received answer");
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (error) {
+          console.error("Error handling answer:", error);
+          updateStatus(`Error handling answer: ${error.message}`);
+        }
       }
     });
 
-    socket.on("ice-candidate", async ({ candidate }) => {
-      try {
-        if (peerConnection && peerConnection.remoteDescription) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-          updateStatus("Added remote ICE candidate");
-        } else {
-          updateStatus("Received ICE candidate but connection not ready yet");
+    socket.on("ice-candidate", async ({ candidate, from }) => {
+      //Added the "from" check!
+      if (from !== myUserId) { // VERY IMPORTANT! Don't process your own ICE Candidates!
+        try {
+          if (peerConnection && peerConnection.remoteDescription) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            updateStatus("Added remote ICE candidate");
+          } else {
+            updateStatus("Received ICE candidate but connection not ready yet");
+          }
+        } catch (error) {
+          console.error("Error adding ICE candidate:", error);
+          updateStatus(`Error adding ICE candidate: ${error.message}`);
         }
-      } catch (error) {
-        console.error("Error adding ICE candidate:", error);
-        updateStatus(`Error adding ICE candidate: ${error.message}`);
       }
     });
 
@@ -718,8 +741,19 @@
       endCall();
     };
 
+    //Error messages for users to be able to check audio and video permissions.
+    socket.on("no-audio-video-permission", (userId) => {
+            updateStatus(`User ${userId} does not have audio and video permission.`);
+        });
+
+    //User-disconnected handler
+    socket.on("user-disconnected", (userId) => {
+        updateStatus(`User ${userId} has disconnected.`);
+    });
+
     // Initial connection status
     updateStatus("Ready to start call. Click 'Start Call' to begin.");
+
   </script>
 </body>
 
