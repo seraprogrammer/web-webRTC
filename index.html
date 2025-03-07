@@ -4,183 +4,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC Video Call</title>
-  <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+  <title>WebRTC Video Chat</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      max-width: 1000px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-
-    .video-container {
-      display: flex;
-      gap: 20px;
-      margin: 20px 0;
-      flex-wrap: wrap;
-    }
-
-    .video-wrapper {
-      flex: 1;
-      min-width: 300px;
+      text-align: center;
+      margin: 20px;
     }
 
     video {
-      width: 100%;
-      height: 300px;
+      width: 45%;
+      margin: 10px;
       border: 1px solid #ccc;
-      background: #f0f0f0;
-      border-radius: 8px;
     }
 
-    .controls {
-      margin: 20px 0;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .status {
-      color: #666;
-      margin: 10px 0;
-      padding: 10px;
-      background-color: #f8f8f8;
-      border-radius: 4px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    button {
-      padding: 8px 16px;
-      background-color: #4285f4;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-
-    button:hover {
-      background-color: #357ae8;
-    }
-
-    button:disabled {
-      background-color: #cccccc;
-      cursor: not-allowed;
-    }
-
-    h2 {
-      color: #333;
-    }
-
-    .audio-controls {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-top: 10px;
-    }
-
-    .volume-slider {
-      width: 150px;
-    }
-
-    #chat-container {
+    #user-count {
+      font-size: 18px;
       margin-top: 20px;
+    }
+
+    #chat-box {
+      height: 100px;
+      overflow-y: auto;
       border: 1px solid #ccc;
       padding: 10px;
-      border-radius: 8px;
-    }
-
-    #chat-messages {
-      height: 200px;
-      overflow-y: scroll;
-      margin-bottom: 10px;
-      padding: 5px;
-      background-color: #f9f9f9;
-    }
-
-    #chat-input {
-      width: 70%;
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-    }
-
-    #send-button {
-      padding: 8px 16px;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
+      margin-top: 20px;
     }
   </style>
 </head>
 
 <body>
-  <h2>WebRTC Real-time Video Call</h2>
+  <h1>WebRTC Video Chat</h1>
+  <video id="local-video" autoplay muted></video>
+  <video id="remote-video" autoplay></video>
+  <br />
+  <div id="user-count">Users Connected: 0</div>
+  <input type="text" id="chat-input" placeholder="Type a message..." />
+  <button id="send-chat-button">Send</button>
+  <div id="chat-box"></div>
 
-  <div class="status" id="connectionStatus">Status: Not connected</div>
-
-  <div class="video-container">
-    <div class="video-wrapper">
-      <h3>Local Video</h3>
-      <video id="localVideo" autoplay playsinline muted></video>
-      <div class="audio-controls">
-        <input type="checkbox" id="muteLocalAudio">
-        <label for="muteLocalAudio">Mute Microphone</label>
-      </div>
-    </div>
-    <div class="video-wrapper">
-      <h3>Remote Video</h3>
-      <video id="remoteVideo" autoplay playsinline></video>
-      <div class="audio-controls">
-        <label for="remoteVolume">Volume:</label>
-        <input type="range" id="remoteVolume" class="volume-slider" min="0" max="1" step="0.1" value="1">
-        <span id="volumeLevel">100%</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="controls">
-    <button id="startCall">Start Call</button>
-    <button id="endCall" disabled>End Call</button>
-    <button id="checkAudio" disabled>Check Audio</button>
-    <button id="reconnect" disabled>Reconnect</button>
-  </div>
-
-  <!-- Chat Area -->
-  <div id="chat-container">
-    <h3>Chat</h3>
-    <div id="chat-messages"></div>
-    <div>
-      <input type="text" id="chat-input" placeholder="Type your message...">
-      <button id="send-button">Send</button>
-    </div>
-  </div>
-
+  <!-- Include Socket.IO Client -->
+  <script src="https://cdn.socket.io/4.7.0/socket.io.min.js"></script>
   <script>
-    // Connection details
-    const serverUrl = "https://webrtc-production-6f32.up.railway.app";
-    const roomId = "1234"; // Use a unique room ID
+    const socket = io(); // Connect to the server
 
-    const socket = io(serverUrl, {
-      //  This is important for debugging connection issues
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity
-    });
-
-    // WebRTC variables
-    let localStream;
-    let peerConnection;
-    let isInitiator = false;
-    let audioContext;
-    let audioAnalyser;
-
-    // Better ICE server configuration with multiple STUN and TURN servers
+    // Configuration for WebRTC peer connection
     const config = {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -188,573 +56,93 @@
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
-        { urls: "stun:trickle-ice.net:3478" },  //Added this!
+        { urls: "stun:trickle-ice.net:3478" },
         {
-          urls: 'turn:numb.viagenie.ca',
-          username: 'webrtc@live.com',
-          credential: 'muazkh'
+          urls: "turn:numb.viagenie.ca",
+          username: "webrtc@live.com",
+          credential: "muazkh",
         },
         {
-          urls: 'turn:turn.anyfirewall.com:443?transport=tcp',
-          username: 'webrtc',
-          credential: 'webrtc'
-        }
+          urls: "turn:turn.anyfirewall.com:443?transport=tcp",
+          username: "webrtc",
+          credential: "webrtc",
+        },
       ],
-      // Optional: Improve WebRTC connections by using modern options
-      iceTransportPolicy: 'all',
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require',
-      sdpSemantics: 'unified-plan'
     };
 
-    // DOM elements
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-    const startCallButton = document.getElementById('startCall');
-    const endCallButton = document.getElementById('endCall');
-    const checkAudioButton = document.getElementById('checkAudio');
-    const reconnectButton = document.getElementById('reconnect');
-    const connectionStatus = document.getElementById('connectionStatus');
-    const muteLocalAudioCheckbox = document.getElementById('muteLocalAudio');
-    const remoteVolumeSlider = document.getElementById('remoteVolume');
-    const volumeLevel = document.getElementById('volumeLevel');
+    // Variables for managing the peer connection
+    let peerConnection;
+    let localStream;
+    let remoteStream;
 
-    // Chat Elements
-    const chatMessages = document.getElementById('chat-messages');
-    const chatInput = document.getElementById('chat-input');
-    const sendButton = document.getElementById('send-button');
+    // DOM Elements
+    const localVideo = document.getElementById("local-video");
+    const remoteVideo = document.getElementById("remote-video");
+    const sendChatButton = document.getElementById("send-chat-button");
+    const chatInput = document.getElementById("chat-input");
+    const chatBox = document.getElementById("chat-box");
+    const userCountDiv = document.getElementById("user-count");
 
-    let myUserId;  // Store my own socket ID
-
-    // Start call button handler
-    startCallButton.addEventListener('click', startCall);
-    endCallButton.addEventListener('click', endCall);
-    checkAudioButton.addEventListener('click', checkAudioTracks);
-    reconnectButton.addEventListener('click', reconnect);
-
-    // Mute local audio handler
-    muteLocalAudioCheckbox.addEventListener('change', (e) => {
-      if (localStream) {
-        localStream.getAudioTracks().forEach(track => {
-          track.enabled = !e.target.checked;
-        });
-        updateStatus(`Local microphone ${e.target.checked ? 'muted' : 'unmuted'}`);
-      }
-    });
-
-    // Remote volume control
-    remoteVolumeSlider.addEventListener('input', (e) => {
-      const volume = e.target.value;
-      remoteVideo.volume = volume;
-      volumeLevel.textContent = `${Math.round(volume * 100)}%`;
-    });
-
-    // Multiple status messages with timestamp
-    let statusLog = [];
-    function updateStatus(message) {
-      const now = new Date();
-      const timestamp = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
-      const logEntry = `[${timestamp}] ${message}`;
-
-      statusLog.push(logEntry);
-      if (statusLog.length > 20) statusLog.shift(); // Keep last 20 messages
-
-      connectionStatus.textContent = statusLog.join('\n');
-      console.log(message);
-    }
-
-    // Initialize and join room
-    async function startCall() {
+    // Function to start capturing local media
+    async function startLocalMedia() {
       try {
-        updateStatus("Requesting camera and microphone access...");
         localStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 48000 // Ensure high quality audio
-          }
+          audio: true,
         });
-
         localVideo.srcObject = localStream;
-        updateStatus("Camera and microphone accessed. Joining room...");
-
-        // Check local audio tracks are available
-        const audioTracks = localStream.getAudioTracks();
-        updateStatus(`Local audio tracks: ${audioTracks.length}. Enabled: ${audioTracks.length > 0 ? audioTracks[0].enabled : 'N/A'}`);
-
-        const videoTracks = localStream.getVideoTracks(); // CHECK VIDEO TRACKS
-        updateStatus(`Local video tracks: ${videoTracks.length}. Enabled: ${videoTracks.length > 0 ? videoTracks[0].enabled : 'N/A'}`);
-
-        // Initialize WebRTC
-        createPeerConnection();
-
-        // Join the room
-        socket.emit("join-room", roomId);
-        startCallButton.disabled = true;
-        endCallButton.disabled = false;
-        checkAudioButton.disabled = false;
-        reconnectButton.disabled = false;
-
-        // Setup audio analyzer
-        setupAudioAnalyzer();
-
-        // Start monitoring stats
-        startStatsMonitoring();
       } catch (error) {
-        updateStatus(`Error: ${error.name} - ${error.message}`);
-        console.error("Error starting call:", error);
-
-        if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-          alert("Camera or microphone not found. Please check your devices and permissions.");
-        } else if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-          alert("Camera or microphone permission denied. Please allow access to your devices.");
-        } else {
-          alert(`Error starting call: ${error.message}`);
-        }
+        console.error("Error accessing media devices:", error);
       }
     }
 
-    // Create WebRTC peer connection
+    // Function to create a new RTCPeerConnection
     function createPeerConnection() {
-      try {
-        peerConnection = new RTCPeerConnection(config);
+      peerConnection = new RTCPeerConnection(config);
 
-        // Add local media tracks to the connection
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            const sender = peerConnection.addTrack(track, localStream);
-            updateStatus(`Added local ${track.kind} track to peer connection`);
-
-            // For debugging: log track details
-            if (track.kind === 'audio') {
-              const settings = track.getSettings();
-              updateStatus(`Audio settings: ${JSON.stringify(settings)}`);
-            }
-          });
-        }
-
-        // Handle ICE candidates
-        peerConnection.onicecandidate = event => {
-          if (event.candidate) {
-            socket.emit("ice-candidate", {
-              candidate: event.candidate,
-              roomId
-            });
-            updateStatus(`Sent ICE candidate: ${event.candidate.candidate.substring(0, 50)}...`);
-          }
-        };
-
-        // Log ICE gathering state changes
-        peerConnection.onicegatheringstatechange = () => {
-          updateStatus(`ICE gathering state: ${peerConnection.iceGatheringState}`);
-        };
-
-        // Log ICE connection state changes
-        peerConnection.oniceconnectionstatechange = () => {
-          updateStatus(`ICE Connection State: ${peerConnection.iceConnectionState}`);
-
-          if (peerConnection.iceConnectionState === 'failed') {
-            updateStatus("Connection failed. Attempting to restart ICE...");
-            peerConnection.restartIce();
-          } else if (peerConnection.iceConnectionState === 'disconnected') {
-            updateStatus("Connection disconnected. You may need to reconnect.");
-          } else if (peerConnection.iceConnectionState === 'connected') {
-            updateStatus("Connection established successfully!");
-          }
-        };
-
-        // Log connection state changes
-        peerConnection.onconnectionstatechange = () => {
-          updateStatus(`Connection state: ${peerConnection.connectionState}`);
-        };
-
-        // Log signaling state changes
-        peerConnection.onsignalingstatechange = () => {
-          updateStatus(`Signaling state: ${peerConnection.signalingState}`);
-        };
-
-        // Handle remote media streams
-        peerConnection.ontrack = event => {
-          if (event.streams && event.streams[0]) {
-            remoteVideo.srcObject = event.streams[0];
-            updateStatus(`Received ${event.track.kind} track`);
-
-            // Set audio output to default speaker if supported
-            if (typeof remoteVideo.setSinkId === 'function') {
-              remoteVideo.setSinkId('default')
-                .then(() => updateStatus("Audio output set to default speaker"))
-                .catch(error => updateStatus(`Error setting audio output: ${error.message}`));
-            }
-
-            // Check audio tracks after a delay
-            setTimeout(checkAudioTracks, 1000);
-
-            // Monitor remote audio tracks
-            if (event.track.kind === 'audio') {
-              monitorRemoteAudioTrack(event.track);
-            }
-          }
-        };
-
-        updateStatus("WebRTC peer connection created");
-      } catch (error) {
-        console.error("Error creating peer connection:", error);
-        updateStatus(`Error creating peer connection: ${error.message}`);
-      }
-    }
-
-    // Function to check and enable audio tracks
-    function checkAudioTracks() {
-      updateStatus("Checking audio tracks...");
-
-      // Check local audio
+      // Add local stream tracks to the peer connection
       if (localStream) {
-        const localAudioTracks = localStream.getAudioTracks();
-        updateStatus(`Local audio tracks: ${localAudioTracks.length}. Enabled: ${localAudioTracks.length > 0 ? localAudioTracks[0].enabled : 'N/A'}`);
+        localStream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, localStream);
+        });
       }
 
-      // Check remote audio
-      if (remoteVideo.srcObject) {
-        const remoteAudioTracks = remoteVideo.srcObject.getAudioTracks();
+      // Handle incoming tracks from the remote peer
+      peerConnection.ontrack = (event) => {
+        remoteStream = event.streams[0];
+        remoteVideo.srcObject = remoteStream;
+      };
 
-        updateStatus(`Remote audio tracks: ${remoteAudioTracks.length}. Enabled: ${remoteAudioTracks.length > 0 ? remoteAudioTracks[0].enabled : 'N/A'}`);
-
-        // Make sure remote audio tracks are enabled
-        if (remoteAudioTracks.length > 0) {
-          remoteAudioTracks.forEach(track => {
-            track.enabled = true;
-            updateStatus(`Ensuring remote audio track is enabled`);
+      // Handle ICE candidates
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("ice-candidate", {
+            roomId: "default-room",
+            candidate: event.candidate,
           });
-        } else {
-          updateStatus("⚠️ Warning: No remote audio tracks found!");
         }
-
-        // Ensure volume is up
-        remoteVideo.volume = 1.0;
-        remoteVolumeSlider.value = 1.0;
-        volumeLevel.textContent = "100%";
-      } else {
-        updateStatus("⚠️ No remote stream available yet");
-      }
-
-      // Get connection stats
-      displayAudioStats();
+      };
     }
 
-    // Function to reconnect the call
-    function reconnect() {
-      updateStatus("Attempting to reconnect...");
-
-      // Close existing connection
-      if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-      }
-
-      // Create new connection
+    // Start local media and join the default room
+    startLocalMedia().then(() => {
       createPeerConnection();
 
-      // Re-join the room
-      socket.emit("join-room", roomId);
-    }
+      // Automatically join the default room
+      socket.emit("join-room", "default-room");
 
-    // Setup audio analyzer to monitor audio levels
-    function setupAudioAnalyzer() {
-      try {
-        if (!audioContext) {
-          audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-
-        if (localStream) {
-          const audioSource = audioContext.createMediaStreamSource(localStream);
-          audioAnalyser = audioContext.createAnalyser();
-          audioAnalyser.fftSize = 256;
-          audioSource.connect(audioAnalyser);
-
-          // Monitor local audio levels
-          monitorLocalAudioLevels();
-        }
-      } catch (error) {
-        updateStatus(`Audio analyzer error: ${error.message}`);
-      }
-    }
-
-    // Monitor local audio levels
-    function monitorLocalAudioLevels() {
-      if (!audioAnalyser) return;
-
-      const dataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
-
-      function checkAudioLevel() {
-        if (!audioAnalyser) return;
-
-        audioAnalyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-
-        // Log only significant audio activity to avoid spamming
-        if (average > 30) {
-          updateStatus(`Local audio level: ${Math.round(average)}/255`);
-        }
-
-        // Continue monitoring if call is active
-        if (peerConnection) {
-          requestAnimationFrame(checkAudioLevel);
-        }
-      }
-
-      checkAudioLevel();
-    }
-
-    // Monitor remote audio track
-    function monitorRemoteAudioTrack(audioTrack) {
-      updateStatus(`Monitoring remote audio track: ${audioTrack.id}`);
-
-      audioTrack.onmute = () => updateStatus("⚠️ Remote audio track muted");
-      audioTrack.onunmute = () => updateStatus("Remote audio track unmuted");
-      audioTrack.onended = () => updateStatus("⚠️ Remote audio track ended");
-    }
-
-    // Display audio statistics
-    function displayAudioStats() {
-      if (!peerConnection) return;
-
-      peerConnection.getStats(null).then(stats => {
-        let hasAudioStats = false;
-
-        stats.forEach(report => {
-          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-            hasAudioStats = true;
-            updateStatus(`Audio stats: packets received=${report.packetsReceived}, packets lost=${report.packetsLost || 0}, jitter=${report.jitter || 0}`);
-          }
-
-          if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-            updateStatus(`Audio outbound: packets sent=${report.packetsSent}`);
-          }
-        });
-
-        if (!hasAudioStats) {
-          updateStatus("No audio statistics available yet");
-        }
-      }).catch(error => {
-        updateStatus(`Error getting stats: ${error.message}`);
+      // Listen for user count updates
+      socket.on("user-count", (data) => {
+        userCountDiv.textContent = `Users Connected: ${data.count}`;
       });
-    }
 
-    // Start monitoring WebRTC stats
-    function startStatsMonitoring() {
-      const statsInterval = setInterval(() => {
-        if (peerConnection && peerConnection.connectionState === 'connected') {
-          displayAudioStats();
-        } else if (!peerConnection) {
-          clearInterval(statsInterval);
-        }
-      }, 10000); // Check every 10 seconds
-    }
-
-    // End the call
-    function endCall() {
-      if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-      }
-
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-
-      if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-        audioAnalyser = null;
-      }
-
-      localVideo.srcObject = null;
-      remoteVideo.srcObject = null;
-
-      startCallButton.disabled = false;
-      endCallButton.disabled = true;
-      checkAudioButton.disabled = true;
-      reconnectButton.disabled = true;
-
-      updateStatus("Call ended");
-    }
-
-    // Chat Logic
-    sendButton.addEventListener('click', sendMessage);
-
-    chatInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        sendMessage();
-      }
-    });
-
-    function sendMessage() {
-      const message = chatInput.value.trim();
-      if (message) {
-        socket.emit('chat-message', {
-          roomId: roomId,
-          message: message
-        });
-        chatInput.value = ''; // Clear the input
-      }
-    }
-
-    socket.on('chat-message', (data) => {
-      displayMessage(data.message, data.sender);  // Use the sender
-    });
-
-    function displayMessage(message, sender) {
-      const messageElement = document.createElement('div');
-      messageElement.textContent = `${sender}: ${message}`;  // Show sender!
-      chatMessages.appendChild(messageElement);
-      chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
-    }
-
-    // Socket.io event handlers
-    socket.on("connect", () => {
-      updateStatus("Connected to signaling server");
-      myUserId = socket.id; // Store your own socket ID
-    });
-
-    socket.on("connect_error", (error) => {
-      updateStatus(`Signaling server connection error: ${error.message}`);
-    });
-
-    socket.on("user-connected", async (userId) => {
-      if (userId !== myUserId) {   // IMPORTANT:  Prevent connecting to yourself!
-        updateStatus(`User connected: ${userId}. Creating offer...`);
-        isInitiator = true;  // You are the offerer
-        createAndSendOffer();  // Call the refactored function
-      }
-    });
-
-    // Refactored function to create and send the offer.
-    async function createAndSendOffer() {
-      try {
-        if (!peerConnection) {
-          createPeerConnection();
-        }
-
-        // Create offer with audio preferences
-        const offerOptions = {
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-          voiceActivityDetection: true
-        };
-
-        const offer = await peerConnection.createOffer(offerOptions);
-
-        // Log SDP for debugging
-        updateStatus("Created offer SDP");
-
-        await peerConnection.setLocalDescription(offer);
-        socket.emit("offer", { offer, roomId });
-      } catch (error) {
-        console.error("Error creating offer:", error);
-        updateStatus(`Error creating offer: ${error.message}`);
-      }
-    }
-
-    socket.on("offer", async ({ offer, from }) => {
-      //  Added the "from" check!
-      if (from !== myUserId) {   // VERY IMPORTANT!  Don't process your own offer!
-        try {
-          updateStatus("Received offer. Creating answer...");
-
-          if (!peerConnection) {
-            createPeerConnection();
-          }
-
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-          // Create answer with audio preferences
-          const answerOptions = {
-            voiceActivityDetection: true
-          };
-
-          const answer = await peerConnection.createAnswer(answerOptions);
-
-          // Log SDP for debugging
-          updateStatus("Created answer SDP");
-
-          await peerConnection.setLocalDescription(answer);
-          socket.emit("answer", { answer, roomId });
-        } catch (error) {
-          console.error("Error handling offer:", error);
-          updateStatus(`Error handling offer: ${error.message}`);
-        }
-      }
-    });
-
-    socket.on("answer", async ({ answer, from }) => {
-      //  Added the "from" check!
-      if (from !== myUserId) { // VERY IMPORTANT! Don't process your own answer!
-        try {
-          updateStatus("Received answer");
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-        } catch (error) {
-          console.error("Error handling answer:", error);
-          updateStatus(`Error handling answer: ${error.message}`);
-        }
-      }
-    });
-
-    socket.on("ice-candidate", async ({ candidate, from }) => {
-      //Added the "from" check!
-      if (from !== myUserId) { // VERY IMPORTANT! Don't process your own ICE Candidates!
-        try {
-          if (peerConnection && peerConnection.remoteDescription) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            updateStatus("Added remote ICE candidate");
-          } else {
-            updateStatus("Received ICE candidate but connection not ready yet");
-          }
-        } catch (error) {
-          console.error("Error adding ICE candidate:", error);
-          updateStatus(`Error adding ICE candidate: ${error.message}`);
-        }
-      }
-    });
-
-    // Play event handler for remote video
-    remoteVideo.onplay = () => {
-      updateStatus("Remote video stream started playing");
-
-      // Force audio output to be handled
-      if (remoteVideo.srcObject && remoteVideo.srcObject.getAudioTracks().length > 0) {
-        updateStatus("Remote audio tracks found in playing stream");
-      }
-    };
-
-    // Connection cleanup on page unload
-    window.onbeforeunload = () => {
-      if (socket) {
-        socket.disconnect();
-      }
-      endCall();
-    };
-
-    //Error messages for users to be able to check audio and video permissions.
-    socket.on("no-audio-video-permission", (userId) => {
-            updateStatus(`User ${userId} does not have audio and video permission.`);
-        });
-
-    //User-disconnected handler
-    socket.on("user-disconnected", (userId) => {
-        updateStatus(`User ${userId} has disconnected.`);
-    });
-
-    // Initial connection status
-    updateStatus("Ready to start call. Click 'Start Call' to begin.");
-
-  </script>
-</body>
-
-</html>
+      // Handle incoming offers
+      socket.on("offer", async (data) => {
+        console.log("Received offer from:", data.from);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit("answer", {
+          roomId: "default-room",
+          answer: peerConnection.localDescription,
+          to: data.from,
