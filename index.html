@@ -103,11 +103,11 @@
     </div>
     <div class="video-wrapper">
       <h3>Remote Video</h3>
-      <video id="remoteVideo_1" autoplay playsinline></video>
+      <video id="remoteVideo" autoplay playsinline></video>
       <div class="audio-controls">
-        <label for="remoteVolume_1">Volume:</label>
-        <input type="range" id="remoteVolume_1" class="volume-slider" min="0" max="1" step="0.1" value="1">
-        <span id="volumeLevel_1">100%</span>
+        <label for="remoteVolume">Volume:</label>
+        <input type="range" id="remoteVolume" class="volume-slider" min="0" max="1" step="0.1" value="1">
+        <span id="volumeLevel">100%</span>
       </div>
     </div>
   </div>
@@ -127,7 +127,7 @@
 
     // WebRTC variables
     let localStream;
-    let peerConnections = {};
+    let peerConnection;
     let isInitiator = false;
     let audioContext;
     let audioAnalyser;
@@ -160,15 +160,15 @@
 
     // DOM elements
     const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo_1');
+    const remoteVideo = document.getElementById('remoteVideo');
     const startCallButton = document.getElementById('startCall');
     const endCallButton = document.getElementById('endCall');
     const checkAudioButton = document.getElementById('checkAudio');
     const reconnectButton = document.getElementById('reconnect');
     const connectionStatus = document.getElementById('connectionStatus');
     const muteLocalAudioCheckbox = document.getElementById('muteLocalAudio');
-    const remoteVolumeSlider = document.getElementById('remoteVolume_1');
-    const volumeLevel = document.getElementById('volumeLevel_1');
+    const remoteVolumeSlider = document.getElementById('remoteVolume');
+    const volumeLevel = document.getElementById('volumeLevel');
 
     // Start call button handler
     startCallButton.addEventListener('click', startCall);
@@ -261,63 +261,67 @@
     // Create WebRTC peer connection
     function createPeerConnection() {
       try {
-        const pc = new RTCPeerConnection(config);
-        peerConnections[1] = pc; // Store the connection
+        peerConnection = new RTCPeerConnection(config);
 
         // Add local media tracks to the connection
         if (localStream) {
           localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-            updateStatus(`Added local ${track.kind} track to peer connection for user 1`);
+            const sender = peerConnection.addTrack(track, localStream);
+            updateStatus(`Added local ${track.kind} track to peer connection`);
+
+            // For debugging: log track details
+            if (track.kind === 'audio') {
+              const settings = track.getSettings();
+              updateStatus(`Audio settings: ${JSON.stringify(settings)}`);
+            }
           });
         }
 
         // Handle ICE candidates
-        pc.onicecandidate = event => {
+        peerConnection.onicecandidate = event => {
           if (event.candidate) {
             socket.emit("ice-candidate", {
               candidate: event.candidate,
-              roomId,
-              1 // Include userId for the specific connection
+              roomId
             });
-            updateStatus(`Sent ICE candidate to user 1`);
+            updateStatus(`Sent ICE candidate: ${event.candidate.candidate.substring(0, 50)}...`);
           }
         };
 
         // Log ICE gathering state changes
-        pc.onicegatheringstatechange = () => {
-          updateStatus(`ICE gathering state: ${pc.iceGatheringState}`);
+        peerConnection.onicegatheringstatechange = () => {
+          updateStatus(`ICE gathering state: ${peerConnection.iceGatheringState}`);
         };
 
         // Log ICE connection state changes
-        pc.oniceconnectionstatechange = () => {
-          updateStatus(`ICE Connection State: ${pc.iceConnectionState}`);
+        peerConnection.oniceconnectionstatechange = () => {
+          updateStatus(`ICE Connection State: ${peerConnection.iceConnectionState}`);
 
-          if (pc.iceConnectionState === 'failed') {
+          if (peerConnection.iceConnectionState === 'failed') {
             updateStatus("Connection failed. Attempting to restart ICE...");
-            pc.restartIce();
-          } else if (pc.iceConnectionState === 'disconnected') {
+            peerConnection.restartIce();
+          } else if (peerConnection.iceConnectionState === 'disconnected') {
             updateStatus("Connection disconnected. You may need to reconnect.");
-          } else if (pc.iceConnectionState === 'connected') {
+          } else if (peerConnection.iceConnectionState === 'connected') {
             updateStatus("Connection established successfully!");
           }
         };
 
         // Log connection state changes
-        pc.onconnectionstatechange = () => {
-          updateStatus(`Connection state: ${pc.connectionState}`);
+        peerConnection.onconnectionstatechange = () => {
+          updateStatus(`Connection state: ${peerConnection.connectionState}`);
         };
 
         // Log signaling state changes
-        pc.onsignalingstatechange = () => {
-          updateStatus(`Signaling state: ${pc.signalingState}`);
+        peerConnection.onsignalingstatechange = () => {
+          updateStatus(`Signaling state: ${peerConnection.signalingState}`);
         };
 
         // Handle remote media streams
-        pc.ontrack = event => {
+        peerConnection.ontrack = event => {
           if (event.streams && event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
-            updateStatus(`Received track from user 1`);
+            updateStatus(`Received ${event.track.kind} track`);
 
             // Set audio output to default speaker if supported
             if (typeof remoteVideo.setSinkId === 'function') {
@@ -337,25 +341,9 @@
         };
 
         updateStatus("WebRTC peer connection created");
-
-        // Create offer and send to the new user
-        const offerOptions = {
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-          voiceActivityDetection: true
-        };
-        pc.createOffer(offerOptions).then(offer => {
-          return pc.setLocalDescription(offer);
-        }).then(() => {
-          socket.emit("offer", { offer: pc.localDescription, roomId, 1 });
-        }).catch(error => {
-          console.error("Error creating offer:", error);
-          updateStatus(`Error creating offer for user 1: ${error.message}`);
-        });
-
       } catch (error) {
         console.error("Error creating peer connection:", error);
-        updateStatus(`Error creating peer connection for user 1: ${error.message}`);
+        updateStatus(`Error creating peer connection: ${error.message}`);
       }
     }
 
@@ -404,9 +392,9 @@
       updateStatus("Attempting to reconnect...");
 
       // Close existing connection
-      if (peerConnections[1]) {
-        peerConnections[1].close();
-        peerConnections[1] = null;
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
       }
 
       // Create new connection
@@ -459,7 +447,7 @@
         }
 
         // Continue monitoring if call is active
-        if (peerConnections[1]) {
+        if (peerConnection) {
           requestAnimationFrame(checkAudioLevel);
         }
       }
@@ -478,9 +466,9 @@
 
     // Display audio statistics
     function displayAudioStats() {
-      if (!peerConnections[1]) return;
+      if (!peerConnection) return;
 
-      peerConnections[1].getStats(null).then(stats => {
+      peerConnection.getStats(null).then(stats => {
         let hasAudioStats = false;
 
         stats.forEach(report => {
@@ -505,9 +493,9 @@
     // Start monitoring WebRTC stats
     function startStatsMonitoring() {
       const statsInterval = setInterval(() => {
-        if (peerConnections[1] && peerConnections[1].connectionState === 'connected') {
+        if (peerConnection && peerConnection.connectionState === 'connected') {
           displayAudioStats();
-        } else if (!peerConnections[1]) {
+        } else if (!peerConnection) {
           clearInterval(statsInterval);
         }
       }, 10000); // Check every 10 seconds
@@ -515,9 +503,9 @@
 
     // End the call
     function endCall() {
-      if (peerConnections[1]) {
-        peerConnections[1].close();
-        peerConnections[1] = null;
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
       }
 
       if (localStream) {
@@ -553,48 +541,85 @@
 
     socket.on("user-connected", async (userId) => {
       updateStatus(`User connected: ${userId}. Creating offer...`);
-      createPeerConnection(userId); // Create a peer connection for the new user
+      isInitiator = true;
+
+      try {
+        if (!peerConnection) {
+          createPeerConnection();
+        }
+
+        // Create offer with audio preferences
+        const offerOptions = {
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+          voiceActivityDetection: true
+        };
+
+        const offer = await peerConnection.createOffer(offerOptions);
+
+        // Ensure offer prioritizes audio
+        let modifiedOffer = offer.sdp;
+
+        // Log SDP for debugging
+        updateStatus("Created offer SDP");
+
+        await peerConnection.setLocalDescription(offer);
+        socket.emit("offer", { offer, roomId });
+      } catch (error) {
+        console.error("Error creating offer:", error);
+        updateStatus(`Error creating offer: ${error.message}`);
+      }
     });
 
-    socket.on("offer", async ({ offer, userId }) => {
+    socket.on("offer", async ({ offer }) => {
       try {
-        updateStatus(`Received offer from user ${userId}. Creating answer...`);
-        createPeerConnection(userId); // Create a peer connection for the user
+        updateStatus("Received offer. Creating answer...");
 
-        const pc = peerConnections[userId];
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit("answer", { answer, roomId, userId });
+        if (!peerConnection) {
+          createPeerConnection();
+        }
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Create answer with audio preferences
+        const answerOptions = {
+          voiceActivityDetection: true
+        };
+
+        const answer = await peerConnection.createAnswer(answerOptions);
+
+        // Log SDP for debugging
+        updateStatus("Created answer SDP");
+
+        await peerConnection.setLocalDescription(answer);
+        socket.emit("answer", { answer, roomId });
       } catch (error) {
         console.error("Error handling offer:", error);
-        updateStatus(`Error handling offer from user ${userId}: ${error.message}`);
+        updateStatus(`Error handling offer: ${error.message}`);
       }
     });
 
-    socket.on("answer", async ({ answer, userId }) => {
+    socket.on("answer", async ({ answer }) => {
       try {
-        updateStatus(`Received answer from user ${userId}`);
-        const pc = peerConnections[userId];
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        updateStatus("Received answer");
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
       } catch (error) {
         console.error("Error handling answer:", error);
-        updateStatus(`Error handling answer from user ${userId}: ${error.message}`);
+        updateStatus(`Error handling answer: ${error.message}`);
       }
     });
 
-    socket.on("ice-candidate", async ({ candidate, userId }) => {
+    socket.on("ice-candidate", async ({ candidate }) => {
       try {
-        const pc = peerConnections[userId];
-        if (pc) {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          updateStatus(`Added remote ICE candidate from user ${userId}`);
+        if (peerConnection && peerConnection.remoteDescription) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          updateStatus("Added remote ICE candidate");
         } else {
-          updateStatus(`Received ICE candidate from user ${userId} but connection not ready yet`);
+          updateStatus("Received ICE candidate but connection not ready yet");
         }
       } catch (error) {
         console.error("Error adding ICE candidate:", error);
-        updateStatus(`Error adding ICE candidate from user ${userId}: ${error.message}`);
+        updateStatus(`Error adding ICE candidate: ${error.message}`);
       }
     });
 
