@@ -18,9 +18,21 @@
       border: 1px solid #ccc;
     }
 
-    #user-count {
+    #status {
       font-size: 18px;
       margin-top: 20px;
+    }
+
+    .success {
+      color: green;
+    }
+
+    .error {
+      color: red;
+    }
+
+    .warning {
+      color: orange;
     }
 
     #chat-box {
@@ -38,15 +50,44 @@
   <video id="local-video" autoplay muted></video>
   <video id="remote-video" autoplay></video>
   <br />
-  <div id="user-count">Users Connected: 0</div>
+  <div id="status">Connecting to server...</div>
   <input type="text" id="chat-input" placeholder="Type a message..." />
   <button id="send-chat-button">Send</button>
   <div id="chat-box"></div>
 
   <!-- Include Socket.IO Client -->
-  <script src="https://cdn.socket.io/4.7.0/socket.io.min.js"></script>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
-    const socket = io(); // Connect to the server
+    // Connect to your Railway server
+    const socket = io("https://webrtc-production-6f32.up.railway.app");
+
+    const statusDiv = document.getElementById("status");
+
+    // Listen for the "connected" event from the server
+    socket.on("connected", (data) => {
+      console.log(data.message); // Log the confirmation message
+      statusDiv.textContent = "Connected to server!";
+      statusDiv.className = "success";
+    });
+
+    // Handle connection errors
+    socket.on("connect_error", (error) => {
+      console.error("Connection error:", error);
+      statusDiv.textContent = "Failed to connect to server.";
+      statusDiv.className = "error";
+    });
+
+    // Handle disconnection
+    socket.on("disconnect", () => {
+      console.log("Disconnected from server.");
+      statusDiv.textContent = "Disconnected from server.";
+      statusDiv.className = "warning";
+    });
+
+    // Debugging: Log connection status
+    socket.on("connect", () => {
+      console.log("Socket.IO connected successfully.");
+    });
 
     // Configuration for WebRTC peer connection
     const config = {
@@ -81,7 +122,6 @@
     const sendChatButton = document.getElementById("send-chat-button");
     const chatInput = document.getElementById("chat-input");
     const chatBox = document.getElementById("chat-box");
-    const userCountDiv = document.getElementById("user-count");
 
     // Function to start capturing local media
     async function startLocalMedia() {
@@ -133,7 +173,7 @@
 
       // Listen for user count updates
       socket.on("user-count", (data) => {
-        userCountDiv.textContent = `Users Connected: ${data.count}`;
+        console.log(`Users Connected: ${data.count}`);
       });
 
       // Handle incoming offers
