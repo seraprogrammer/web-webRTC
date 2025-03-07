@@ -146,3 +146,57 @@
           roomId: "default-room",
           answer: peerConnection.localDescription,
           to: data.from,
+        });
+      });
+
+      // Handle incoming answers
+      socket.on("answer", async (data) => {
+        console.log("Received answer from:", data.from);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      });
+
+      // Handle incoming ICE candidates
+      socket.on("ice-candidate", async (data) => {
+        console.log("Received ICE candidate from:", data.from);
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+      });
+
+      // Handle user disconnections
+      socket.on("user-disconnected", (userId) => {
+        console.log(`User ${userId} disconnected`);
+        remoteVideo.srcObject = null;
+      });
+    });
+
+    // Send a chat message
+    sendChatButton.addEventListener("click", () => {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      socket.emit("chat-message", {
+        roomId: "default-room",
+        message,
+      });
+
+      chatInput.value = "";
+    });
+
+    // Listen for chat messages from others
+    socket.on("chat-message", (data) => {
+      console.log(`Received chat message from ${data.sender}: ${data.message}`);
+      chatBox.innerHTML += `<p><strong>${data.sender}:</strong> ${data.message}</p>`;
+    });
+
+    // Function to create an offer
+    async function createOffer() {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.emit("offer", {
+        roomId: "default-room",
+        offer: peerConnection.localDescription,
+      });
+    }
+  </script>
+</body>
+
+</html>
